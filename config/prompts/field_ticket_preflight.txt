@@ -1,0 +1,1 @@
+(Placeholder) Pre-approval validation — hybrid with deterministic Laravel rules; you summarize and explain tool results only.

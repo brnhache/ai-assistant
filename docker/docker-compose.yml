@@ -1,0 +1,35 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ../api:/app/api:ro
+      - ../app:/app/app:ro
+      - ../config:/app/config:ro
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: desert
+      POSTGRES_PASSWORD: desert
+      POSTGRES_DB: desert_ai
+    ports:
+      - "5433:5432"
+    volumes:
+      - desert_ai_pg:/var/lib/postgresql/data
+
+volumes:
+  desert_ai_pg:

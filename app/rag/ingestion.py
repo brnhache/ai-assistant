@@ -1,0 +1,1 @@
+# Placeholder — document ingestion pipeline
