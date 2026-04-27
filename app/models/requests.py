@@ -1,6 +1,11 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class ChatHistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=20000)
 
 
 class ChatRequest(BaseModel):
@@ -9,7 +14,21 @@ class ChatRequest(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     message: str = Field(..., min_length=1)
     conversation_id: str | None = None
+    message_history: list[ChatHistoryMessage] = Field(
+        default_factory=list,
+        description="Prior user/assistant turns in this session for follow-up questions.",
+    )
     context: dict[str, Any] = Field(default_factory=dict)
+    desert_api_token: str | None = Field(
+        default=None,
+        repr=False,
+        description="Optional Sanctum token for Desert API calls (forwarded by Laravel).",
+    )
+    desert_api_base_url: str | None = Field(
+        default=None,
+        repr=False,
+        description="Tenant API base (e.g. https://tenant.app/api) for multi-tenant subdomains.",
+    )
 
     @field_validator("capabilities")
     @classmethod
