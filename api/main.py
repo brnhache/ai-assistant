@@ -1,5 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import logging
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +17,34 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+def _configure_logging() -> None:
+    """Ensure our loggers (desert.chat, desert.api, etc.) go to stdout.
+
+    Uvicorn only configures its own loggers by default. This keeps things
+    simple: route all logs at or above the configured LOG_LEVEL to stdout,
+    which ECS/CloudWatch then captures.
+    """
+    root = logging.getLogger()
+    if any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+        # Already configured by the environment (tests, uvicorn, etc.).
+        return
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    handler.setFormatter(formatter)
+    root.addHandler(handler)
+    # Respect LOG_LEVEL from settings (default info)
+    try:
+        level_name = get_settings().log_level.upper()
+        level = getattr(logging, level_name, logging.INFO)
+    except Exception:
+        level = logging.INFO
+    root.setLevel(level)
+
+
 def create_app() -> FastAPI:
+    _configure_logging()
     settings = get_settings()
     app = FastAPI(
         title="Desert AI Assistant",
