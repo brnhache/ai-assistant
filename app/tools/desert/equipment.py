@@ -31,12 +31,16 @@ def build_list_equipment_tool(
     request_token: str | None = None,
 ) -> StructuredTool:
     async def _run(note: str = "") -> str:
+        import sys
+
         base, token = resolve_desert_base_and_token(
             settings, request_base=request_base, request_token=request_token
         )
         print(
             "[desert.api] list_equipment resolve base=%s token_len=%s"
-            % (base or "(empty)", len(token or ""))
+            % (base or "(empty)", len(token or "")),
+            file=sys.stderr,
+            flush=True,
         )
         if not token:
             log_desert_tool_config_error(
@@ -45,7 +49,9 @@ def build_list_equipment_tool(
                 "missing Desert API bearer token (no desert_api_token and DESERT_SERVICE_TOKEN unset)",
             )
             print(
-                "[desert.api] list_equipment config_error: missing token (no desert_api_token and DESERT_SERVICE_TOKEN unset)"
+                "[desert.api] list_equipment config_error: missing token (no desert_api_token and DESERT_SERVICE_TOKEN unset)",
+                file=sys.stderr,
+                flush=True,
             )
             return (
                 "error: no Desert API token "
@@ -58,7 +64,9 @@ def build_list_equipment_tool(
                 "missing Desert API base URL (no desert_api_base_url and DESERT_API_BASE_URL empty)",
             )
             print(
-                "[desert.api] list_equipment config_error: missing base URL (no desert_api_base_url and DESERT_API_BASE_URL empty)"
+                "[desert.api] list_equipment config_error: missing base URL (no desert_api_base_url and DESERT_API_BASE_URL empty)",
+                file=sys.stderr,
+                flush=True,
             )
             return (
                 "error: no Desert API base URL. Laravel must send desert_api_base_url "
@@ -66,7 +74,7 @@ def build_list_equipment_tool(
             )
         path = "/fleet/equipment"
         url = f"{base}{path}"
-        print("[desert.api] list_equipment GET %s" % url)
+        print("[desert.api] list_equipment GET %s" % url, file=sys.stderr, flush=True)
         log_desert_get_start("desert_list_equipment", base, path)
         headers = {
             "Authorization": f"Bearer {token}",
@@ -84,7 +92,9 @@ def build_list_equipment_tool(
                 "desert_list_equipment", base, path, e.response.status_code, body
             )
             print(
-                "[desert.api] list_equipment http_error status=%s" % e.response.status_code
+                "[desert.api] list_equipment http_error status=%s" % e.response.status_code,
+                file=sys.stderr,
+                flush=True,
             )
             return (
                 f"error: Desert API returned HTTP {e.response.status_code} for GET /fleet/equipment. "
@@ -93,14 +103,18 @@ def build_list_equipment_tool(
         except httpx.HTTPError as e:
             log_desert_get_request_failed("desert_list_equipment", base, path, str(e))
             print(
-                "[desert.api] list_equipment request_failed error=%s" % (str(e) or "(empty)")
+                "[desert.api] list_equipment request_failed error=%s" % (str(e) or "(empty)"),
+                file=sys.stderr,
+                flush=True,
             )
             return f"error calling Desert API: {e!s}"
         keys = list(data.keys()) if isinstance(data, dict) else ["<list>"]
         log_desert_get_ok("desert_list_equipment", base, path, r.status_code, keys)
         print(
             "[desert.api] list_equipment ok status=%s keys=%s"
-            % (r.status_code, ",".join(keys) if keys else "(none)")
+            % (r.status_code, ",".join(keys) if keys else "(none)"),
+            file=sys.stderr,
+            flush=True,
         )
         text = json.dumps(data, indent=2, default=str)
         if len(text) > 24_000:
