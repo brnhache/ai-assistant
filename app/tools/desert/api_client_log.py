@@ -59,3 +59,18 @@ def log_desert_get_request_failed(tool: str, base: str | None, path: str, err: s
         path,
         err,
     )
+
+
+def log_desert_tool_config_error(tool: str, base: str | None, reason: str) -> None:
+    """Log non-HTTP configuration / context errors (e.g. missing token or base URL).
+
+    These do not trigger an HTTP call, so they won't be captured by the normal
+    request_* helpers above. Using this ensures CloudWatch shows why a tool
+    immediately returned an "error:" string to the LLM.
+    """
+    log.warning(
+        "desert_tool config_error tool=%s base_url=%s reason=%s",
+        tool,
+        _safe_base(base),
+        reason,
+    )

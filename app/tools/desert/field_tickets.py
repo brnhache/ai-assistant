@@ -9,6 +9,7 @@ from app.tools.desert.api_client_log import (
     log_desert_get_ok,
     log_desert_get_request_failed,
     log_desert_get_start,
+    log_desert_tool_config_error,
 )
 from app.tools.desert.resolve import resolve_desert_base_and_token
 from config.settings import Settings
@@ -34,11 +35,21 @@ def build_list_workorders_tool(
             settings, request_base=request_base, request_token=request_token
         )
         if not token:
+            log_desert_tool_config_error(
+                "desert_list_workorders",
+                base,
+                "missing Desert API bearer token (no desert_api_token and DESERT_SERVICE_TOKEN unset)",
+            )
             return (
                 "error: no Desert API token "
                 "(set DESERT_SERVICE_TOKEN or pass desert_api_token from Laravel)"
             )
         if not base:
+            log_desert_tool_config_error(
+                "desert_list_workorders",
+                base,
+                "missing Desert API base URL (no desert_api_base_url and DESERT_API_BASE_URL empty)",
+            )
             return (
                 "error: no Desert API base URL. Laravel must send desert_api_base_url "
                 "(e.g. https://your-tenant.app/api) for the correct tenant."
