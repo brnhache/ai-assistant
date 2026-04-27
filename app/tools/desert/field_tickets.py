@@ -34,11 +34,18 @@ def build_list_workorders_tool(
         base, token = resolve_desert_base_and_token(
             settings, request_base=request_base, request_token=request_token
         )
+        print(
+            "[desert.api] list_workorders resolve base=%s token_len=%s"
+            % (base or "(empty)", len(token or ""))
+        )
         if not token:
             log_desert_tool_config_error(
                 "desert_list_workorders",
                 base,
                 "missing Desert API bearer token (no desert_api_token and DESERT_SERVICE_TOKEN unset)",
+            )
+            print(
+                "[desert.api] list_workorders config_error: missing token (no desert_api_token and DESERT_SERVICE_TOKEN unset)"
             )
             return (
                 "error: no Desert API token "
@@ -50,6 +57,9 @@ def build_list_workorders_tool(
                 base,
                 "missing Desert API base URL (no desert_api_base_url and DESERT_API_BASE_URL empty)",
             )
+            print(
+                "[desert.api] list_workorders config_error: missing base URL (no desert_api_base_url and DESERT_API_BASE_URL empty)"
+            )
             return (
                 "error: no Desert API base URL. Laravel must send desert_api_base_url "
                 "(e.g. https://your-tenant.app/api) for the correct tenant."
@@ -57,6 +67,7 @@ def build_list_workorders_tool(
         # Smaller page = faster response for the LLM; tenant can raise per_page up to 500 in Laravel
         path = "/workorders?per_page=100&page=1"
         url = f"{base}{path}"
+        print("[desert.api] list_workorders GET %s" % url)
         log_desert_get_start("desert_list_workorders", base, path)
         headers = {
             "Authorization": f"Bearer {token}",
@@ -73,15 +84,25 @@ def build_list_workorders_tool(
             log_desert_get_http_error(
                 "desert_list_workorders", base, path, e.response.status_code, body
             )
+            print(
+                "[desert.api] list_workorders http_error status=%s" % e.response.status_code
+            )
             return (
                 f"error: Desert API returned HTTP {e.response.status_code} for GET /workorders. "
                 f"Details: {e!s}. Response (truncated): {body!r}"
             )
         except httpx.HTTPError as e:
             log_desert_get_request_failed("desert_list_workorders", base, path, str(e))
+            print(
+                "[desert.api] list_workorders request_failed error=%s" % (str(e) or "(empty)")
+            )
             return f"error calling Desert API: {e!s}"
         keys = list(data.keys()) if isinstance(data, dict) else ["<list>"]
         log_desert_get_ok("desert_list_workorders", base, path, r.status_code, keys)
+        print(
+            "[desert.api] list_workorders ok status=%s keys=%s"
+            % (r.status_code, ",".join(keys) if keys else "(none)")
+        )
         text = json.dumps(data, indent=2, default=str)
         if len(text) > 24_000:
             return text[:24_000] + "\n…(truncated)"

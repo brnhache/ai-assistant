@@ -31,6 +31,16 @@ async def chat(
             detail="LLM is not configured (set OPENAI_API_KEY)",
         )
     tok = body.desert_api_token or ""
+    # Print for ECS/CloudWatch even if logging config is odd.
+    print(
+        "[desert.chat] chat_inbound tenant_id=%s user_id=%s base=%s token_len=%s"
+        % (
+            body.tenant_id,
+            body.user_id,
+            (body.desert_api_base_url or "")[:200] or None,
+            len(tok) if tok else 0,
+        )
+    )
     log.info(
         "chat_inbound tenant_id=%s user_id=%s desert_api_base_url=%s token_len=%s",
         body.tenant_id,
@@ -50,7 +60,12 @@ async def chat(
             request_token=body.desert_api_token,
             message_history=body.message_history,
         )
+        print("[desert.chat] chat_reply ok tenant_id=%s user_id=%s" % (body.tenant_id, body.user_id))
     except RuntimeError as e:
+        print(
+            "[desert.chat] chat_runtime_error tenant_id=%s user_id=%s detail=%s"
+            % (body.tenant_id, body.user_id, str(e))
+        )
         log.error(
             "chat_runtime_error tenant_id=%s user_id=%s detail=%s",
             body.tenant_id,
@@ -60,6 +75,10 @@ async def chat(
         )
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
     except Exception:
+        print(
+            "[desert.chat] chat_agent_failed tenant_id=%s user_id=%s"
+            % (body.tenant_id, body.user_id)
+        )
         log.exception(
             "chat_agent_failed tenant_id=%s user_id=%s",
             body.tenant_id,
