@@ -20,27 +20,29 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def _configure_logging() -> None:
     """Ensure our loggers (desert.chat, desert.api, etc.) go to stdout.
 
-    Uvicorn only configures its own loggers by default. This keeps things
-    simple: route all logs at or above the configured LOG_LEVEL to stdout,
-    which ECS/CloudWatch then captures.
+    We don't touch uvicorn's own loggers; instead we attach a handler to the
+    "desert" logger subtree so `desert.chat` / `desert.api` reliably show up
+    in ECS/CloudWatch regardless of how uvicorn configures root.
     """
-    root = logging.getLogger()
-    if any(isinstance(h, logging.StreamHandler) for h in root.handlers):
-        # Already configured by the environment (tests, uvicorn, etc.).
+    base_logger = logging.getLogger("desert")
+    if any(isinstance(h, logging.StreamHandler) for h in base_logger.handlers):
+        # Already configured (tests or prior init).
         return
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
     handler.setFormatter(formatter)
-    root.addHandler(handler)
+    base_logger.addHandler(handler)
     # Respect LOG_LEVEL from settings (default info)
     try:
         level_name = get_settings().log_level.upper()
         level = getattr(logging, level_name, logging.INFO)
     except Exception:
         level = logging.INFO
-    root.setLevel(level)
+    base_logger.setLevel(level)
+    # Children (desert.chat, desert.api, etc.) will propagate to this logger.
+    base_logger.propagate = False
 
 
 def create_app() -> FastAPI:
