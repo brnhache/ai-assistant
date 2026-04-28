@@ -85,10 +85,37 @@ def get_current_taskdef_arn(cluster: str, service: str, region: str) -> str:
             "--output", "json",
         ]
     )
-    services = data.get("services", []) if isinstance(data, dict) else []
+    if not isinstance(data, dict):
+        raise SystemExit(f"unexpected describe-services response: {data!r}")
+    failures = data.get("failures") or []
+    services = data.get("services") or []
+    if failures and not services:
+        raise SystemExit(f"describe-services failures: {json.dumps(failures)}")
     if not services:
-        raise SystemExit(f"service not found: {service}")
-    return services[0]["taskDefinition"]
+        raise SystemExit(
+            f"service not found: cluster={cluster} service={service}. "
+            f"Raw response keys: {list(data.keys())}"
+        )
+    svc = services[0]
+    td = svc.get("taskDefinition")
+    if not td:
+        # Dump what we DID get so we can see why.
+        print(
+            "describe-services returned a service entry without 'taskDefinition'.",
+            file=sys.stderr,
+        )
+        print("Service keys present: " + ", ".join(sorted(svc.keys())), file=sys.stderr)
+        print("Status: " + str(svc.get("status")), file=sys.stderr)
+        print("Deployments: " + json.dumps(svc.get("deployments", []), default=str)[:1000], file=sys.stderr)
+        # Try fallbacks
+        deployments = svc.get("deployments") or []
+        for d in deployments:
+            cand = d.get("taskDefinition")
+            if cand:
+                print(f"Falling back to deployment taskDefinition: {cand}", file=sys.stderr)
+                return cand
+        raise SystemExit("could not determine current task definition arn")
+    return td
 
 
 def get_taskdef(td_arn: str, region: str) -> dict:
