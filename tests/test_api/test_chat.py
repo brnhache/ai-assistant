@@ -32,7 +32,7 @@ def test_chat_wrong_capability() -> None:
     assert r.status_code == 403
 
 
-def test_chat_no_openai_key_returns_503() -> None:
+def test_chat_no_llm_key_returns_503() -> None:
     r = client.post(
         "/api/v1/chat",
         headers={"Authorization": "Bearer test-inbound-token"},
@@ -44,4 +44,5 @@ def test_chat_no_openai_key_returns_503() -> None:
         },
     )
     assert r.status_code == 503
-    assert "OPENAI_API_KEY" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert "ANTHROPIC_API_KEY" in detail or "OPENAI_API_KEY" in detail

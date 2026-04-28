@@ -25,10 +25,10 @@ async def chat(
             status.HTTP_403_FORBIDDEN,
             detail='Capability "chat" not included in capabilities for this request',
         )
-    if not settings.openai_api_key.strip():
+    if not (settings.anthropic_api_key.strip() or settings.openai_api_key.strip()):
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM is not configured (set OPENAI_API_KEY)",
+            detail="LLM is not configured (set ANTHROPIC_API_KEY or OPENAI_API_KEY)",
         )
     import sys
 

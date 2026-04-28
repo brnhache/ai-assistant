@@ -1,5 +1,3 @@
-import json
-
 import httpx
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -12,6 +10,7 @@ from app.tools.desert.api_client_log import (
     log_desert_tool_config_error,
 )
 from app.tools.desert.resolve import resolve_desert_base_and_token
+from app.tools.desert.shape import shape_paginated
 from config.settings import Settings
 
 
@@ -116,14 +115,17 @@ def build_list_equipment_tool(
             file=sys.stderr,
             flush=True,
         )
-        text = json.dumps(data, indent=2, default=str)
-        if len(text) > 24_000:
-            return text[:24_000] + "\n…(truncated)"
-        return text
+        # Structured shape so the LLM quotes `total` instead of counting items.
+        return shape_paginated(data, items_key="equipment")
 
     return StructuredTool.from_function(
         name="desert_list_equipment",
-        description="List all equipment for the current tenant via Desert GET /fleet/equipment.",
+        description=(
+            "List all equipment for the current tenant via Desert GET /fleet/equipment. "
+            "Returns JSON with: total (authoritative count from server), showing, "
+            "page, per_page, equipment (array). Use `total` for count questions \u2014 "
+            "never count `equipment` by hand and never invent rows."
+        ),
         args_schema=_EquipmentArgs,
         coroutine=_run,
     )

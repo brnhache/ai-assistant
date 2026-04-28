@@ -1,9 +1,15 @@
+import sys
 from pathlib import Path
 from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+
+try:
+    from langchain_anthropic import ChatAnthropic
+except ImportError:  # pragma: no cover - dep missing in local dev
+    ChatAnthropic = None  # type: ignore[assignment]
 
 from app.agents.router import resolve_chat_model
 from app.models.requests import ChatHistoryMessage
@@ -20,13 +26,79 @@ def _load_main_system_prompt() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _build_chat_llm(settings: Settings):
+    """Build the chat LLM with primary + fallback.
+
+    Why Anthropic primary:
+        Tool-calling agents that hand the model tool output and ask it to
+        summarise / count / quote are sensitive to confabulation. Claude
+        Opus is markedly better than the GPT-4o family at saying "I see N
+        items" without inventing extras. We had a real incident where
+        gpt-4o-mini returned 30 tickets when the tool output had 28, then
+        fabricated FT09999 + FT10000 with fake clients to retrofit the
+        wrong count. Opus avoids that class of failure.
+
+    Why OpenAI fallback:
+        If Anthropic has an outage we still want the assistant to work.
+        gpt-5.1 (current frontier OpenAI) is roughly comparable for tool
+        faithfulness and noticeably better than 4o-mini.
+    """
+    has_anthropic = (
+        settings.use_anthropic_primary
+        and bool(settings.anthropic_api_key.strip())
+        and ChatAnthropic is not None
+    )
+    has_openai = bool(settings.openai_api_key.strip())
+
+    openai_llm = None
+    if has_openai:
+        openai_llm = ChatOpenAI(
+            api_key=settings.openai_api_key,
+            model=resolve_chat_model(settings),
+            temperature=0,
+        )
+
+    if has_anthropic:
+        anthropic_llm = ChatAnthropic(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+            temperature=0,
+            max_tokens=4096,
+        )
+        if openai_llm is not None:
+            print(
+                f"[desert.chat] llm primary=anthropic/{settings.anthropic_model} "
+                f"fallback=openai/{resolve_chat_model(settings)}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return anthropic_llm.with_fallbacks([openai_llm])
+        print(
+            f"[desert.chat] llm primary=anthropic/{settings.anthropic_model} (no fallback configured)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return anthropic_llm
+
+    if openai_llm is not None:
+        print(
+            f"[desert.chat] llm primary=openai/{resolve_chat_model(settings)} (anthropic disabled or unavailable)",
+            file=sys.stderr,
+            flush=True,
+        )
+        return openai_llm
+
+    return None
+
+
 def _build_agent_graph(
     settings: Settings,
     *,
     request_base: str | None = None,
     request_token: str | None = None,
 ):
-    if not settings.openai_api_key.strip():
+    llm = _build_chat_llm(settings)
+    if llm is None:
         return None
     tools = [
         build_list_equipment_tool(
@@ -36,12 +108,6 @@ def _build_agent_graph(
             settings, request_base=request_base, request_token=request_token
         ),
     ]
-    model = resolve_chat_model(settings)
-    llm = ChatOpenAI(
-        api_key=settings.openai_api_key,
-        model=model,
-        temperature=0,
-    )
     system = _load_main_system_prompt()
     return create_agent(llm, tools, system_prompt=system)
 
@@ -91,7 +157,9 @@ async def invoke_chat_agent(
         settings, request_base=request_base, request_token=request_token
     )
     if graph is None:
-        raise RuntimeError("OPENAI_API_KEY is not set; chat agent is unavailable")
+        raise RuntimeError(
+            "No chat LLM configured. Set ANTHROPIC_API_KEY (preferred) or OPENAI_API_KEY."
+        )
     prior: list[BaseMessage] = _turns_to_lc_messages(list(message_history or []))
     if len(prior) > _MAX_TURNS:
         prior = prior[-_MAX_TURNS :]

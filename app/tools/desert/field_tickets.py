@@ -1,4 +1,5 @@
 import json
+import sys
 
 import httpx
 from langchain_core.tools import StructuredTool
@@ -12,6 +13,7 @@ from app.tools.desert.api_client_log import (
     log_desert_tool_config_error,
 )
 from app.tools.desert.resolve import resolve_desert_base_and_token
+from app.tools.desert.shape import shape_paginated
 from config.settings import Settings
 
 
@@ -31,8 +33,6 @@ def build_list_workorders_tool(
     """request_* comes from Laravel each chat (tenant /api base + user token). Do not rely on env host."""
 
     async def _run(note: str = "") -> str:
-        import sys
-
         base, token = resolve_desert_base_and_token(
             settings, request_base=request_base, request_token=request_token
         )
@@ -109,6 +109,7 @@ def build_list_workorders_tool(
                 flush=True,
             )
             return f"error calling Desert API: {e!s}"
+
         keys = list(data.keys()) if isinstance(data, dict) else ["<list>"]
         log_desert_get_ok("desert_list_workorders", base, path, r.status_code, keys)
         print(
@@ -117,16 +118,26 @@ def build_list_workorders_tool(
             file=sys.stderr,
             flush=True,
         )
-        text = json.dumps(data, indent=2, default=str)
-        if len(text) > 24_000:
-            return text[:24_000] + "\n…(truncated)"
-        return text
+
+        # Return a structured summary instead of dumping raw JSON, so the LLM
+        # can quote `total` directly instead of eyeballing-and-guessing. The
+        # 4o-mini family liked to count visible items by hand and confabulate
+        # entries when the count didn't "feel right".
+        return shape_paginated(data, items_key="items")
 
     return StructuredTool.from_function(
         name="desert_list_workorders",
         description=(
-            "List field tickets (workorders) for the tenant via Desert GET /workorders."
+            "List field tickets (workorders) for the tenant via Desert GET /workorders. "
+            "Returns JSON with: total (authoritative count from server), showing "
+            "(items returned in this call), page, per_page, items (array of ticket "
+            "dicts). Use `total` to answer count questions - never count `items` "
+            "by hand. If showing < total there is more data; do NOT invent the "
+            "missing rows."
         ),
         args_schema=_WorkordersArgs,
         coroutine=_run,
     )
+
+
+

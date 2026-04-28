@@ -23,12 +23,19 @@ class Settings(BaseSettings):
     desert_service_token: str = Field(default="", alias="DESERT_SERVICE_TOKEN")
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    # Kept as the documented OpenAI fallback chat model when Anthropic is unavailable.
+    openai_model: str = Field(default="gpt-5.1", alias="OPENAI_MODEL")
     openai_model_fast: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL_FAST")
     openai_model_strong: str = Field(default="gpt-4o", alias="OPENAI_MODEL_STRONG")
 
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-    anthropic_model: str = Field(default="claude-3-5-sonnet-latest", alias="ANTHROPIC_MODEL")
+    # Primary chat model. Opus chosen for faithfulness on tool-calling agents — see
+    # docs note in app/agents/main_agent.py.
+    anthropic_model: str = Field(default="claude-opus-4-7", alias="ANTHROPIC_MODEL")
+
+    # When true (default), use Anthropic as primary and fall back to OpenAI on failure.
+    # When false, use OpenAI directly (for testing or if you want to disable Anthropic).
+    use_anthropic_primary: bool = Field(default=True, alias="USE_ANTHROPIC_PRIMARY")
 
     database_url: str = Field(default="", alias="DATABASE_URL")
     redis_url: str = Field(default="", alias="REDIS_URL")
