@@ -13,6 +13,10 @@ except ImportError:  # pragma: no cover - dep missing in local dev
 
 from app.agents.router import resolve_chat_model
 from app.models.requests import ChatHistoryMessage
+from app.tools.desert.custom_forms import (
+    build_list_custom_forms_tool,
+    build_list_form_submissions_tool,
+)
 from app.tools.desert.equipment import build_list_equipment_tool
 from app.tools.desert.field_tickets import build_list_workorders_tool
 from config.settings import Settings
@@ -105,6 +109,12 @@ def _build_agent_graph(
             settings, request_base=request_base, request_token=request_token
         ),
         build_list_workorders_tool(
+            settings, request_base=request_base, request_token=request_token
+        ),
+        build_list_custom_forms_tool(
+            settings, request_base=request_base, request_token=request_token
+        ),
+        build_list_form_submissions_tool(
             settings, request_base=request_base, request_token=request_token
         ),
     ]

@@ -97,3 +97,56 @@ def test_response_under_threshold_does_not_truncate():
     out = _parse(shape_paginated(response))
     assert "items_truncated" not in out
     assert len(out["items"]) == 5
+
+
+def test_paginator_meta_envelope_shape_is_supported():
+    """Some endpoints (form submissions) put pagination in `meta`, not top-level."""
+    response = {
+        "status": "success",
+        "data": [{"id": 1}, {"id": 2}],
+        "meta": {
+            "current_page": 1,
+            "last_page": 1,
+            "per_page": 100,
+            "total": 14,
+        },
+    }
+    out = _parse(shape_paginated(response, items_key="submissions"))
+    assert out["total"] == 14
+    assert out["total_known"] is True
+    assert out["showing"] == 2
+    assert out["page"] == 1
+    assert out["per_page"] == 100
+    assert out["last_page"] == 1
+    assert len(out["submissions"]) == 2
+
+
+def test_paginator_top_level_takes_precedence_over_meta():
+    """If both top-level and meta have pagination fields, prefer top-level."""
+    response = {
+        "data": [{"id": 1}],
+        "total": 7,
+        "current_page": 1,
+        "meta": {"total": 999, "current_page": 99},
+    }
+    out = _parse(shape_paginated(response))
+    assert out["total"] == 7  # top-level wins
+    assert out["page"] == 1
+
+
+def test_flat_list_endpoint_marks_total_unknown():
+    """GET /api/forms returns a flat list with no pagination meta.
+
+    We should NOT lie and claim total_known when there is no server-provided total.
+    """
+    response = {
+        "status": "success",
+        "data": [
+            {"id": 1, "name": "pumpjack_inspection", "submissions_count": 14},
+            {"id": 2, "name": "hazard_assessment", "submissions_count": 5},
+        ],
+    }
+    out = _parse(shape_paginated(response, items_key="forms"))
+    assert out["total"] == 2
+    assert out["total_known"] is False
+    assert len(out["forms"]) == 2

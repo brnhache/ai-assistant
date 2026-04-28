@@ -42,15 +42,26 @@ def shape_paginated(data: object, *, items_key: str = "items") -> str:
     """
     if isinstance(data, dict) and isinstance(data.get("data"), list):
         items = data["data"]
-        total_raw = data.get("total")
+        # Some endpoints (e.g. /api/workorders) put pagination at the top level.
+        # Others (e.g. /api/forms/{form}/submissions) wrap it in `meta`. Try
+        # top-level first, then meta. Treat what's not paginated as a flat list.
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+
+        def _pick(key: str):
+            v = data.get(key)
+            if v is None:
+                v = meta.get(key)
+            return v
+
+        total_raw = _pick("total")
         total_known = isinstance(total_raw, int)
         out: dict = {
             "total": total_raw if total_known else len(items),
             "total_known": total_known,
             "showing": len(items),
-            "page": data.get("current_page"),
-            "per_page": data.get("per_page"),
-            "last_page": data.get("last_page"),
+            "page": _pick("current_page"),
+            "per_page": _pick("per_page"),
+            "last_page": _pick("last_page"),
             items_key: items,
         }
     elif isinstance(data, list):
