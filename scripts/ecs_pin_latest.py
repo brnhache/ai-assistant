@@ -42,10 +42,14 @@ import time
 from typing import Any
 
 
-def run(cmd: list[str], capture: bool = True, check: bool = True) -> str:
+_QUIET = False
+
+
+def run(cmd: list[str], capture: bool = True, check: bool = True, quiet: bool = False) -> str:
     """Run a command, return stdout. Raises on nonzero unless check=False."""
     printable = " ".join(shlex.quote(p) for p in cmd)
-    print(f"$ {printable}", file=sys.stderr)
+    if not (quiet or _QUIET):
+        print(f"$ {printable}", file=sys.stderr)
     proc = subprocess.run(cmd, capture_output=capture, text=True, check=False)
     if check and proc.returncode != 0:
         sys.stderr.write(proc.stderr)
@@ -53,8 +57,8 @@ def run(cmd: list[str], capture: bool = True, check: bool = True) -> str:
     return proc.stdout
 
 
-def aws_json(cmd: list[str]) -> Any:
-    out = run(cmd)
+def aws_json(cmd: list[str], quiet: bool = False) -> Any:
+    out = run(cmd, quiet=quiet)
     return json.loads(out) if out.strip() else None
 
 
@@ -234,7 +238,8 @@ def update_service(cluster: str, service: str, td_arn: str, region: str) -> None
 
 def wait_for_rollout(cluster: str, service: str, region: str, max_seconds: int) -> bool:
     start = time.time()
-    last_state = None
+    last_status = None
+    last_print = 0.0
     while time.time() - start < max_seconds:
         data = aws_json(
             [
@@ -243,7 +248,8 @@ def wait_for_rollout(cluster: str, service: str, region: str, max_seconds: int) 
                 "--services", service,
                 "--region", region,
                 "--output", "json",
-            ]
+            ],
+            quiet=True,  # don't spam $ aws ecs describe-services on every poll
         )
         services = data.get("services", []) if isinstance(data, dict) else []
         if not services:
@@ -254,9 +260,14 @@ def wait_for_rollout(cluster: str, service: str, region: str, max_seconds: int) 
             state = primary.get("rolloutState")
             running = primary.get("runningCount")
             desired = primary.get("desiredCount")
-            if state != last_state:
-                print(f"  rollout: {state}  running={running}/{desired}", file=sys.stderr)
-                last_state = state
+            elapsed = int(time.time() - start)
+            status = (state, running, desired)
+            now = time.time()
+            # Print on every status change OR every 15s as a heartbeat.
+            if status != last_status or now - last_print >= 15:
+                print(f"  [{elapsed:>3}s] rollout: {state}  running={running}/{desired}", file=sys.stderr)
+                last_status = status
+                last_print = now
             if state == "COMPLETED":
                 return True
             if state == "FAILED":
