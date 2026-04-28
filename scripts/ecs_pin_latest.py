@@ -236,9 +236,26 @@ def update_service(cluster: str, service: str, td_arn: str, region: str) -> None
     )
 
 
-def wait_for_rollout(cluster: str, service: str, region: str, max_seconds: int) -> bool:
+def wait_for_rollout(
+    cluster: str,
+    service: str,
+    region: str,
+    max_seconds: int,
+    expected_digest: str,
+) -> bool:
+    """Wait until a running task is on the expected image digest.
+
+    Why we don't trust rolloutState alone: ECS sometimes leaves the PRIMARY
+    deployment's rolloutState as IN_PROGRESS even when desiredCount == runningCount
+    and tasks are healthy (we've seen this when an old deployment drains slowly
+    or when the service uses certain ALB configurations). The unambiguous
+    success signal is: ``the running task is on the new image digest`` AND
+    ``desiredCount == runningCount > 0`` for the PRIMARY deployment.
+
+    We also bail early on FAILED rolloutState or non-zero failedTasks.
+    """
     start = time.time()
-    last_status = None
+    last_status: tuple | None = None
     last_print = 0.0
     while time.time() - start < max_seconds:
         data = aws_json(
@@ -249,29 +266,68 @@ def wait_for_rollout(cluster: str, service: str, region: str, max_seconds: int) 
                 "--region", region,
                 "--output", "json",
             ],
-            quiet=True,  # don't spam $ aws ecs describe-services on every poll
+            quiet=True,
         )
         services = data.get("services", []) if isinstance(data, dict) else []
         if not services:
-            time.sleep(5); continue
+            time.sleep(5)
+            continue
         deployments = services[0].get("deployments", [])
         primary = next((d for d in deployments if d.get("status") == "PRIMARY"), None)
-        if primary:
-            state = primary.get("rolloutState")
-            running = primary.get("runningCount")
-            desired = primary.get("desiredCount")
+        active_count = sum(1 for d in deployments if d.get("status") == "ACTIVE")
+
+        # Watch for explicit failure on the primary.
+        if primary and primary.get("rolloutState") == "FAILED":
             elapsed = int(time.time() - start)
-            status = (state, running, desired)
-            now = time.time()
-            # Print on every status change OR every 15s as a heartbeat.
-            if status != last_status or now - last_print >= 15:
-                print(f"  [{elapsed:>3}s] rollout: {state}  running={running}/{desired}", file=sys.stderr)
-                last_status = status
-                last_print = now
-            if state == "COMPLETED":
-                return True
-            if state == "FAILED":
-                return False
+            print(
+                f"  [{elapsed:>3}s] rollout: FAILED  reason={primary.get('rolloutStateReason')!r}",
+                file=sys.stderr,
+            )
+            return False
+
+        running_digest = get_running_digest(cluster, service, region)
+
+        primary_state = primary.get("rolloutState") if primary else None
+        primary_running = primary.get("runningCount") if primary else None
+        primary_desired = primary.get("desiredCount") if primary else None
+        primary_failed = primary.get("failedTasks") if primary else None
+
+        elapsed = int(time.time() - start)
+        status = (
+            primary_state,
+            primary_running,
+            primary_desired,
+            active_count,
+            (running_digest or "")[:19],
+        )
+        now = time.time()
+        if status != last_status or now - last_print >= 15:
+            digest_short = (running_digest or "none")[:19]
+            print(
+                f"  [{elapsed:>3}s] rollout={primary_state} "
+                f"running={primary_running}/{primary_desired} "
+                f"failed={primary_failed} active_deployments={active_count} "
+                f"digest={digest_short}\u2026",
+                file=sys.stderr,
+            )
+            last_status = status
+            last_print = now
+
+        # Real success signal: the running task is on the new digest AND the
+        # primary deployment thinks all desired tasks are running.
+        if (
+            running_digest == expected_digest
+            and primary
+            and primary_desired
+            and primary_running == primary_desired
+            and primary_running > 0
+        ):
+            return True
+
+        # ECS-reported success is also acceptable (defence in depth).
+        if primary_state == "COMPLETED":
+            return True
+
         time.sleep(5)
     return False
 
@@ -317,7 +373,9 @@ def main() -> int:
     update_service(args.cluster, args.service, new_arn, args.region)
     print("rolling service...", file=sys.stderr)
 
-    ok = wait_for_rollout(args.cluster, args.service, args.region, args.wait)
+    ok = wait_for_rollout(
+        args.cluster, args.service, args.region, args.wait, expected_digest=digest
+    )
     if not ok:
         print("\n❌ rollout did not reach COMPLETED in time. Check CloudWatch + ECS events.", file=sys.stderr)
         return 2
