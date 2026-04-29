@@ -22,7 +22,7 @@ import json
 # rows with full nested client/employee data; small enough to keep latency
 # reasonable. If a tenant has thousands of items we'll truncate and tell the
 # LLM we did.
-_MAX_BYTES = 24_000
+_MAX_BYTES = 96_000
 
 
 def shape_paginated(data: object, *, items_key: str = "items") -> str:
