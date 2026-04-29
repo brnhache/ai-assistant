@@ -12,6 +12,13 @@ except ImportError:  # pragma: no cover - dep missing in local dev
     ChatAnthropic = None  # type: ignore[assignment]
 
 from app.agents.router import resolve_chat_model
+from app.memory.extractor import schedule_extractor
+from app.memory.store import (
+    Memory,
+    format_memories_for_prompt,
+    load_relevant_memories,
+    touch_memory,
+)
 from app.models.requests import ChatHistoryMessage
 from app.tools.desert.custom_forms import (
     build_list_custom_forms_tool,
@@ -23,6 +30,7 @@ from app.tools.desert.field_tickets import build_list_workorders_tool
 from config.settings import Settings
 
 _MAX_TURNS = 40
+_MEMORY_KINDS = ["mapping", "preference", "fact"]
 
 
 def _load_main_system_prompt() -> str:
@@ -101,6 +109,7 @@ def _build_agent_graph(
     *,
     request_base: str | None = None,
     request_token: str | None = None,
+    system_prompt_override: str | None = None,
 ):
     llm = _build_chat_llm(settings)
     if llm is None:
@@ -122,7 +131,7 @@ def _build_agent_graph(
             settings, request_base=request_base, request_token=request_token
         ),
     ]
-    system = _load_main_system_prompt()
+    system = system_prompt_override or _load_main_system_prompt()
     return create_agent(llm, tools, system_prompt=system)
 
 
@@ -166,9 +175,49 @@ async def invoke_chat_agent(
     request_base: str | None = None,
     request_token: str | None = None,
     message_history: list[ChatHistoryMessage] | list[dict[str, str]] | None = None,
+    user_id: int | None = None,
+    user_role: str | None = None,
+    conversation_id: str | None = None,
 ) -> str:
+    # 1. Load relevant long-term memories for this user (if we know who they are).
+    memories: list[Memory] = []
+    if request_base and request_token and user_id is not None and user_role:
+        try:
+            memories = await load_relevant_memories(
+                request_base,
+                request_token,
+                user_id=user_id,
+                user_role=user_role,
+                kinds=_MEMORY_KINDS,
+                limit=20,
+            )
+        except Exception as e:  # pragma: no cover - never block chat on memory
+            print(
+                f"[desert.chat] memory_load_failed user_id={user_id} error={e!s}",
+                file=sys.stderr,
+                flush=True,
+            )
+            memories = []
+
+    base_system = _load_main_system_prompt()
+    if memories:
+        memory_block = format_memories_for_prompt(memories)
+        system_prompt = (
+            f"{base_system}\n\n"
+            "# Long-term memory (things you've learned about this tenant/user)\n\n"
+            "Treat these as durable facts about the current account. Prefer them over guesses, "
+            "but if a tool call returns data that contradicts a memory, trust the live data and "
+            "surface the discrepancy in plain language.\n\n"
+            f"{memory_block}"
+        )
+    else:
+        system_prompt = base_system
+
     graph = _build_agent_graph(
-        settings, request_base=request_base, request_token=request_token
+        settings,
+        request_base=request_base,
+        request_token=request_token,
+        system_prompt_override=system_prompt,
     )
     if graph is None:
         raise RuntimeError(
@@ -181,4 +230,27 @@ async def invoke_chat_agent(
     result = await graph.ainvoke({"messages": transcript})
     messages = result.get("messages", [])
     text = _last_ai_text(messages)
+
+    # 2. Touch memories that were available this turn so frequently-used ones
+    #    rank higher next time. Cheap; we don't await individually.
+    if memories and request_base and request_token:
+        for m in memories:
+            try:
+                await touch_memory(request_base, request_token, memory_id=m.id)
+            except Exception:  # pragma: no cover
+                pass
+
+    # 3. Fire-and-forget memory extraction over this conversation.
+    if request_base and request_token and user_id is not None:
+        full_transcript = transcript + [AIMessage(content=text or "")]
+        schedule_extractor(
+            settings,
+            base=request_base,
+            token=request_token,
+            user_id=user_id,
+            transcript=full_transcript,
+            existing_memories=memories,
+            source_conversation_id=conversation_id,
+        )
+
     return text or str(result)

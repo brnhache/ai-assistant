@@ -56,6 +56,11 @@ async def chat(
         base_url=body.desert_api_base_url,
         token=body.desert_api_token,
     )
+    user_role_raw = body.context.get("user_role") if isinstance(body.context, dict) else None
+    user_role = str(user_role_raw).lower() if user_role_raw else "user"
+    if user_role not in {"admin", "manager", "user"}:
+        user_role = "user"
+    conv = body.conversation_id or str(uuid.uuid4())
     try:
         reply = await invoke_chat_agent(
             settings,
@@ -63,6 +68,9 @@ async def chat(
             request_base=body.desert_api_base_url,
             request_token=body.desert_api_token,
             message_history=body.message_history,
+            user_id=body.user_id,
+            user_role=user_role,
+            conversation_id=conv,
         )
         print(
             "[desert.chat] chat_reply ok tenant_id=%s user_id=%s"
@@ -103,5 +111,4 @@ async def chat(
         ) from None
     finally:
         reset_desert_api_context(ctx)
-    conv = body.conversation_id or str(uuid.uuid4())
     return ChatResponse(reply=reply, conversation_id=conv)
