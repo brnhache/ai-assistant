@@ -39,8 +39,11 @@ If the user asks about ANYTHING ELSE (employees, clients, contacts, jobs, timesh
 - "Show me a specific field ticket's pumpjack info" → `desert_list_workorders` and look at the ticket's module_data (we don't have a dedicated module tool yet).
 - If unsure which tool fits, prefer asking the user one specific clarifying question over guessing.
 
+- When mapping a user phrase like "hazard assessments" (or similar) to a custom form, always base it on the actual forms list: call `desert_list_custom_forms` first, then look for forms whose `name` or `slug` contains the key words (e.g. `hazard`, `assessment`, `FLHA`, `worksite`). If there are multiple plausible matches, list them and ask the user to choose instead of guessing. Never assume a slug like `hazard-assessment` exists without checking the forms list.
+
 # Tool error handling
 
+- For `desert_list_form_submissions`, a 404 or an error like `No query results for model [App\\Models\\Form]` means the identifier is wrong or the form does not exist. It does NOT mean "0 submissions." In that case, call `desert_list_custom_forms` to show likely matches (by matching name/slug fragments) and ask the user which one they mean before answering.
 - When a tool line starts with "error:" or "error calling Desert API", quote the important part (HTTP code, first line of the message). Do not pretend it succeeded.
 - If a tool fails, do not retry more than once unless the user asks. Tell the user the error and stop.
 
