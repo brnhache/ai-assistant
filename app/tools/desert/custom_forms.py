@@ -55,7 +55,7 @@ class _ListFormSubmissionsArgs(BaseModel):
         ...,
         description=(
             "Form identifier: numeric id, slug, or exact name. The server accepts "
-            "all three; prefer slug or name (e.g. 'pumpjack_inspection') if known."
+            "all three; prefer slug or name (e.g. 'pumpjack-inspection' or 'hazard_assessment') if known."
         ),
     )
     per_page: int = Field(
@@ -203,7 +203,7 @@ def build_list_custom_forms_tool(
             "IMPORTANT: custom forms are DIFFERENT from workorder modules. "
             "Workorder modules (e.g. pumpjack_information) are JSON sections "
             "embedded INSIDE a field ticket; custom forms (e.g. "
-            "pumpjack_inspection) are separate documents that may be linked to "
+            "pumpjack-inspection) are separate documents that may be linked to "
             "a field ticket via workorder_id. Don't conflate them."
         ),
         args_schema=_ListFormsArgs,
@@ -251,7 +251,7 @@ def build_list_form_submissions_tool(
         description=(
             "List SUBMISSIONS of a specific custom form via Desert "
             "GET /forms/{form}/submissions. Args: form (id, slug, or name; "
-            "e.g. 'pumpjack_inspection'), per_page (default 50, max 200), "
+            "e.g. 'pumpjack-inspection' or 'hazard_assessment'), per_page (default 50, max 200), "
             "page (default 1). Returns JSON with: total (authoritative count "
             "of submissions for this form, possibly across multiple pages), "
             "showing (rows in THIS page), page, per_page, last_page, "
