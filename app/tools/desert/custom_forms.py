@@ -159,6 +159,91 @@ async def _http_get_json(
 
 
 # ---------------------------------------------------------------------------
+# Name/slug resolution helpers (for LLM-friendly matching)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_form_phrase(text: str) -> tuple[str, list[str]]:
+    """Normalize a human phrase or form name/slug into a token list.
+
+    Lowercases, normalizes pump jack → pumpjack, replaces dashes/underscores
+    with spaces, strips punctuation, and splits on whitespace.
+    """
+    import re
+
+    t = (text or "").lower()
+    # Normalize common domain-specific variants first.
+    t = t.replace("pump jack", "pumpjack")
+    # Replace underscores/dashes with spaces to align slugs and names.
+    t = re.sub(r"[_-]+", " ", t)
+    # Drop non-alphanumeric chars except space.
+    t = re.sub(r"[^a-z0-9\s]", " ", t)
+    # Collapse whitespace and split.
+    tokens = [tok for tok in t.split() if tok]
+    return t.strip(), tokens
+
+
+def _score_form_match(query_tokens: list[str], form_tokens: list[str]) -> float:
+    """Return a heuristic similarity score between 0 and 1.
+
+    - Base score from token overlap.
+    - Bonuses for core domain tokens (pumpjack, hazard, inspection, installation, flha, worksite).
+    - Small penalty when query asks for installation but form only mentions inspection (and vice versa).
+    """
+    if not query_tokens or not form_tokens:
+        return 0.0
+
+    qset = set(query_tokens)
+    fset = set(form_tokens)
+    shared = qset & fset
+    base = len(shared) / max(len(qset), 1)
+
+    score = base
+
+    core_tokens = {"pumpjack", "hazard", "inspection", "install", "installation", "flha", "worksite"}
+    core_shared = core_tokens & shared
+    if core_shared:
+        score += 0.15 * len(core_shared)
+
+    # Distinguish installation vs inspection questions a bit.
+    q_has_install = any(tok.startswith("install") for tok in qset)
+    q_has_inspect = any(tok.startswith("inspect") for tok in qset)
+    f_has_install = any(tok.startswith("install") for tok in fset)
+    f_has_inspect = any(tok.startswith("inspect") for tok in fset)
+
+    if q_has_install and f_has_inspect and not f_has_install:
+        score -= 0.15
+    if q_has_inspect and f_has_install and not f_has_inspect:
+        score -= 0.15
+
+    # Clamp to [0,1].
+    if score < 0.0:
+        score = 0.0
+    if score > 1.0:
+        score = 1.0
+    return score
+
+
+class _ResolveFormArgs(BaseModel):
+    query: str = Field(
+        ...,
+        description=(
+            "Natural-language phrase the user used to refer to a custom form, "
+            "such as 'pumpjack installations', 'hazard assessments', or "
+            "'those FLHA forms'."
+        ),
+    )
+    max_candidates: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description=(
+            "Maximum number of candidate forms to return, sorted by relevance "
+            "score (highest first)."
+        ),
+    )
+
+# ---------------------------------------------------------------------------
 # Public tool builders
 # ---------------------------------------------------------------------------
 
@@ -263,5 +348,94 @@ def build_list_form_submissions_tool(
             "before claiming you've seen them all."
         ),
         args_schema=_ListFormSubmissionsArgs,
+        coroutine=_run,
+    )
+
+
+def build_resolve_form_name_tool(
+    settings: Settings,
+    *,
+    request_base: str | None = None,
+    request_token: str | None = None,
+) -> StructuredTool:
+    """Resolve a natural-language form phrase to likely custom-form candidates.
+
+    This helper is designed to bridge between how humans talk about forms
+    ("pumpjack installations", "hazard assessments", "those FLHA forms") and
+    the actual `name`/`slug` fields on Form records. It always looks at the
+    real forms list first (GET /forms) and returns a scored candidate list.
+
+    The LLM should use this to decide which form id/slug to pass to
+    `desert_list_form_submissions` instead of guessing a slug directly.
+    """
+
+    async def _run(query: str, max_candidates: int = 5) -> str:
+        tool_name = "desert_resolve_form_name"
+        base, token, err = _resolve_or_error(
+            settings, request_base, request_token, tool_name
+        )
+        if err is not None:
+            return err
+
+        path = "/forms"
+        data = await _http_get_json(base, path, token, tool_name)
+        if isinstance(data, str):
+            return data
+
+        forms = []
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            forms = data["data"]
+        elif isinstance(data, list):
+            forms = data
+
+        norm_query, q_tokens = _normalize_form_phrase(query)
+        scored = []
+        for f in forms:
+            name = f.get("name") or ""
+            slug = f.get("slug") or ""
+            norm_name, name_tokens = _normalize_form_phrase(name)
+            norm_slug, slug_tokens = _normalize_form_phrase(slug)
+            tokens = list({*name_tokens, *slug_tokens})
+            score = _score_form_match(q_tokens, tokens)
+            scored.append(
+                {
+                    "id": f.get("id"),
+                    "name": name,
+                    "slug": slug,
+                    "submissions_count": f.get("submissions_count"),
+                    "is_active": f.get("is_active"),
+                    "expose_to_clients": f.get("expose_to_clients"),
+                    "score": round(score, 4),
+                }
+            )
+
+        # Sort by score desc and keep top N with score > 0.
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        candidates = [c for c in scored if c["score"] > 0][:max_candidates]
+
+        import json as _json
+
+        return _json.dumps(
+            {
+                "query": query,
+                "normalized_query": norm_query,
+                "candidates": candidates,
+            },
+            indent=2,
+            default=str,
+        )
+
+    return StructuredTool.from_function(
+        name="desert_resolve_form_name",
+        description=(
+            "Given a natural-language phrase like 'pumpjack installations' or "
+            "'hazard assessments', look at the tenant's actual custom forms "
+            "list (GET /forms) and return likely matches sorted by relevance. "
+            "Use this to decide which form id/slug to pass to "
+            "desert_list_form_submissions. If no candidates are returned, "
+            "tell the user you don't see any forms that look like that phrase "
+            "and show them what forms DO exist instead of assuming 0."
+        ),
+        args_schema=_ResolveFormArgs,
         coroutine=_run,
     )
