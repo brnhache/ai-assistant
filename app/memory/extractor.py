@@ -192,7 +192,11 @@ async def extract_and_save_memories(
             model=settings.openai_memory_extractor_model,
             temperature=0,
         )
-        structured = llm.with_structured_output(_ExtractorOutput)
+        # method="function_calling" avoids OpenAI's strict structured-output
+        # mode, which 400s on open-ended dict[str, Any] fields like `metadata`.
+        structured = llm.with_structured_output(
+            _ExtractorOutput, method="function_calling"
+        )
         result = await structured.ainvoke(
             [
                 {"role": "system", "content": _SYSTEM_PROMPT},
