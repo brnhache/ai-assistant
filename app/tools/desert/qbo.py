@@ -44,6 +44,21 @@ class _QboCustomersArgs(BaseModel):
     )
 
 
+class _QboInvoicesArgs(BaseModel):
+    customer_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional QuickBooks Customer Id to filter invoices by. If "
+            "omitted, the most recent invoices across all customers are "
+            "returned."
+        ),
+    )
+    note: str = Field(
+        default="",
+        description="Optional context from the user question (ignored for the HTTP call).",
+    )
+
+
 async def _get_json(
     *,
     settings: Settings,
@@ -241,5 +256,84 @@ def build_qbo_list_customers_tool(
             "when the user asks which customers are synced."
         ),
         args_schema=_QboCustomersArgs,
+        coroutine=_run,
+    )
+
+
+def build_qbo_list_invoices_tool(
+    settings: Settings,
+    *,
+    request_base: str | None = None,
+    request_token: str | None = None,
+) -> StructuredTool:
+    """List QuickBooks invoices via Desert.
+
+    Wraps GET /api/workorder/qbo-invoices. Returns a concise summary of
+    recent invoices (limited to 100 by the Laravel endpoint), optionally
+    filtered by QuickBooks Customer Id.
+    """
+
+    async def _run(customer_id: str | None = None, note: str = "") -> str:  # noqa: ARG001
+        path = "/workorder/qbo-invoices"
+        if customer_id:
+            path = f"{path}?customer_id={customer_id}"
+
+        data = await _get_json(
+            settings=settings,
+            request_base=request_base,
+            request_token=request_token,
+            path=path,
+            tool_name="desert_qbo_list_invoices",
+        )
+        if isinstance(data, str):
+            return data
+
+        invoices = data.get("invoices")
+        if not isinstance(invoices, list) or not invoices:
+            message = data.get("message") or "No QuickBooks invoices found."
+            return message
+
+        lines: list[str] = []
+        lines.append("QuickBooks invoices (from Desert):")
+        for inv in invoices:
+            inv_id = inv.get("id")
+            doc = inv.get("doc_number") or inv.get("doc")
+            date = inv.get("txn_date") or inv.get("date")
+            total = inv.get("total")
+            balance = inv.get("balance")
+            cust_name = inv.get("customer_name")
+            cust_id = inv.get("customer_id")
+
+            bits: list[str] = []
+            if inv_id is not None:
+                bits.append(f"id={inv_id}")
+            if doc:
+                bits.append(f"doc={doc}")
+            if date:
+                bits.append(f"date={date}")
+            if total is not None:
+                bits.append(f"total={total}")
+            if balance is not None:
+                bits.append(f"balance={balance}")
+            if cust_name or cust_id:
+                who = cust_name or "?"
+                if cust_id is not None:
+                    who = f"{who} (customer_id={cust_id})" if who != "?" else f"customer_id={cust_id}"
+                bits.append(f"customer={who}")
+
+            if bits:
+                lines.append(" - " + ", ".join(bits))
+
+        return "\n".join(lines)
+
+    return StructuredTool.from_function(
+        name="desert_qbo_list_invoices",
+        description=(
+            "List invoices from QuickBooks Online via Desert's existing "
+            "integration. Use this when reconciling field tickets to QBO or "
+            "when the user asks about recent invoices. You may optionally "
+            "filter by QuickBooks Customer Id."
+        ),
+        args_schema=_QboInvoicesArgs,
         coroutine=_run,
     )

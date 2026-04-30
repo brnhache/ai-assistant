@@ -23,6 +23,7 @@ from app.tools.desert.field_tickets import build_list_workorders_tool
 from app.tools.desert.qbo import (
     build_qbo_connection_status_tool,
     build_qbo_list_customers_tool,
+    build_qbo_list_invoices_tool,
 )
 from config.settings import Settings
 
@@ -100,6 +101,12 @@ def build_desert_tools(
     )
     _add(
         build_qbo_list_customers_tool(
+            settings, request_base=request_base, request_token=request_token
+        ),
+        risk="external",
+    )
+    _add(
+        build_qbo_list_invoices_tool(
             settings, request_base=request_base, request_token=request_token
         ),
         risk="external",
