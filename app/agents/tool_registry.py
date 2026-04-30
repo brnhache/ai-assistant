@@ -20,6 +20,10 @@ from app.tools.desert.custom_forms import (
 )
 from app.tools.desert.equipment import build_list_equipment_tool
 from app.tools.desert.field_tickets import build_list_workorders_tool
+from app.tools.desert.qbo import (
+    build_qbo_connection_status_tool,
+    build_qbo_list_customers_tool,
+)
 from config.settings import Settings
 
 
@@ -85,6 +89,20 @@ def build_desert_tools(
             settings, request_base=request_base, request_token=request_token
         ),
         risk="read",
+    )
+
+    # QuickBooks (read-only, via Desert API; still "external" from FTM's POV).
+    _add(
+        build_qbo_connection_status_tool(
+            settings, request_base=request_base, request_token=request_token
+        ),
+        risk="external",
+    )
+    _add(
+        build_qbo_list_customers_tool(
+            settings, request_base=request_base, request_token=request_token
+        ),
+        risk="external",
     )
 
     return BuiltTools(tools=tools, metadata=meta)
