@@ -12,6 +12,8 @@ except ImportError:  # pragma: no cover - dep missing in local dev
     ChatAnthropic = None  # type: ignore[assignment]
 
 from app.agents.router import resolve_chat_model
+from app.agents.tool_registry import build_desert_tools
+from app.agents.confirmation import apply_confirmation_policy
 from app.memory.extractor import schedule_extractor
 from app.memory.store import (
     Memory,
@@ -115,26 +117,12 @@ def _build_agent_graph(
     llm = _build_chat_llm(settings)
     if llm is None:
         return None
-    tools = [
-        build_list_equipment_tool(
-            settings, request_base=request_base, request_token=request_token
-        ),
-        build_list_workorders_tool(
-            settings, request_base=request_base, request_token=request_token
-        ),
-        build_recall_conversation_tool(
-            settings, request_base=request_base, request_token=request_token
-        ),
-        build_list_custom_forms_tool(
-            settings, request_base=request_base, request_token=request_token
-        ),
-        build_list_form_submissions_tool(
-            settings, request_base=request_base, request_token=request_token
-        ),
-        build_resolve_form_name_tool(
-            settings, request_base=request_base, request_token=request_token
-        ),
-    ]
+
+    built = build_desert_tools(
+        settings, request_base=request_base, request_token=request_token
+    )
+    tools = apply_confirmation_policy(built.tools, built.metadata, surface="chat")
+
     system = system_prompt_override or _load_main_system_prompt()
     return create_agent(llm, tools, system_prompt=system)
 
