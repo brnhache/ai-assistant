@@ -202,8 +202,18 @@ def build_qbo_list_customers_tool(
         lines: list[str] = []
         lines.append("QuickBooks customers (from Desert):")
         for c in customers:
-            # The exact shape depends on the QuickBooks SDK; be defensive.
-            name = c.get("DisplayName") or c.get("CompanyName") or c.get("FullyQualifiedName") or c.get("Name")
+            # The exact shape depends on the QuickBooks SDK; be defensive. In
+            # our Laravel trait (Quickbooks::quickbooksGetCustomers) we return
+            # a simplified array with keys: name, id, description. Fall back
+            # through the richer SDK field names as well just in case.
+            name = (
+                c.get("name")
+                or c.get("DisplayName")
+                or c.get("CompanyName")
+                or c.get("FullyQualifiedName")
+                or c.get("Name")
+            )
+            desc = c.get("description")
             cid = c.get("Id") or c.get("id")
             email = None
             primary_email = c.get("PrimaryEmailAddr") or {}
@@ -214,6 +224,8 @@ def build_qbo_list_customers_tool(
                 line_bits.append(f"id={cid}")
             if name:
                 line_bits.append(f"name={name}")
+            if desc:
+                line_bits.append(f"description={desc}")
             if email:
                 line_bits.append(f"email={email}")
             if line_bits:
