@@ -25,6 +25,7 @@ from app.tools.desert.qbo import (
     build_qbo_list_customers_tool,
     build_qbo_list_invoices_tool,
 )
+from app.tools.desert.reconcile import build_qbo_reconcile_customer_tool
 from config.settings import Settings
 
 
@@ -107,6 +108,12 @@ def build_desert_tools(
     )
     _add(
         build_qbo_list_invoices_tool(
+            settings, request_base=request_base, request_token=request_token
+        ),
+        risk="external",
+    )
+    _add(
+        build_qbo_reconcile_customer_tool(
             settings, request_base=request_base, request_token=request_token
         ),
         risk="external",
