@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-5.1", alias="OPENAI_MODEL")
     openai_model_fast: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL_FAST")
     # Cheap model used for the AI long-term memory extractor (post-conversation).
-    openai_memory_extractor_model: str = Field(default="gpt-5-mini", alias="OPENAI_MEMORY_EXTRACTOR_MODEL")
+    openai_memory_extractor_model: str = Field(default="gpt-5.1", alias="OPENAI_MEMORY_EXTRACTOR_MODEL")
     openai_model_strong: str = Field(default="gpt-4o", alias="OPENAI_MODEL_STRONG")
 
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
