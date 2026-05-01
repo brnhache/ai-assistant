@@ -205,6 +205,7 @@ async def invoke_chat_agent(
             memories = []
 
     base_system = _load_main_system_prompt()
+    # Inject long-term memory block when available.
     if memories:
         memory_block = format_memories_for_prompt(memories)
         system_prompt = (
@@ -217,6 +218,31 @@ async def invoke_chat_agent(
         )
     else:
         system_prompt = base_system
+
+    # Inject an implementation note about which underlying model is serving this tenant,
+    # so the assistant can answer questions like \"what model are you?\" accurately.
+    mode = (llm_mode or "").lower()
+    if mode in ("openai_gpt5", "openai"):
+        model_note = (
+            "You are currently backed by OpenAI gpt-5.1 via the OpenAI Chat Completions API "
+            "for this tenant."
+        )
+    else:
+        # Default: Anthropic Opus primary with OpenAI fallback when configured.
+        model_note = (
+            f"You are currently backed by Anthropic Claude Opus (model '{settings.anthropic_model}') "
+            f"with OpenAI {resolve_chat_model(settings)} as a fallback when Anthropic is unavailable "
+            "for this tenant."
+        )
+
+    system_prompt = (
+        f"{system_prompt}\n\n"
+        "# Implementation note (models)\n\n"
+        "The following is implementation detail for you, not the user. If the user explicitly "
+        "asks which model, provider, or API you are running on, answer concisely and honestly "
+        "using this description. Do not volunteer it unprompted.\n\n"
+        f"{model_note}"
+    )
 
     graph = _build_agent_graph(
         settings,
