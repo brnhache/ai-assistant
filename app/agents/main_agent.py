@@ -42,7 +42,7 @@ def _load_main_system_prompt() -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _build_chat_llm(settings: Settings):
+def _build_chat_llm(settings: Settings, llm_mode: str | None = None):
     """Build the chat LLM with primary + fallback.
 
     Why Anthropic primary:
@@ -58,9 +58,20 @@ def _build_chat_llm(settings: Settings):
         If Anthropic has an outage we still want the assistant to work.
         gpt-5.1 (current frontier OpenAI) is roughly comparable for tool
         faithfulness and noticeably better than 4o-mini.
+
+    Per-tenant override:
+        llm_mode can force OpenAI-only (openai_gpt5) even when Anthropic is
+        configured globally, or leave Anthropic primary when omitted.
     """
+    mode = (llm_mode or "").lower()
+    use_anthropic_primary = settings.use_anthropic_primary
+    if mode in ("openai_gpt5", "openai"):
+        use_anthropic_primary = False
+    elif mode in ("anthropic_opus", "anthropic"):
+        use_anthropic_primary = True
+
     has_anthropic = (
-        settings.use_anthropic_primary
+        use_anthropic_primary
         and bool(settings.anthropic_api_key.strip())
         and ChatAnthropic is not None
     )
@@ -84,13 +95,13 @@ def _build_chat_llm(settings: Settings):
         if openai_llm is not None:
             print(
                 f"[desert.chat] llm primary=anthropic/{settings.anthropic_model} "
-                f"fallback=openai/{resolve_chat_model(settings)}",
+                f"fallback=openai/{resolve_chat_model(settings)} mode={mode or 'default'}",
                 file=sys.stderr,
                 flush=True,
             )
             return anthropic_llm.with_fallbacks([openai_llm])
         print(
-            f"[desert.chat] llm primary=anthropic/{settings.anthropic_model} (no fallback configured)",
+            f"[desert.chat] llm primary=anthropic/{settings.anthropic_model} (no fallback configured, mode={mode or 'default'})",
             file=sys.stderr,
             flush=True,
         )
@@ -98,7 +109,7 @@ def _build_chat_llm(settings: Settings):
 
     if openai_llm is not None:
         print(
-            f"[desert.chat] llm primary=openai/{resolve_chat_model(settings)} (anthropic disabled or unavailable)",
+            f"[desert.chat] llm primary=openai/{resolve_chat_model(settings)} (anthropic disabled or unavailable, mode={mode or 'default'})",
             file=sys.stderr,
             flush=True,
         )
@@ -113,8 +124,9 @@ def _build_agent_graph(
     request_base: str | None = None,
     request_token: str | None = None,
     system_prompt_override: str | None = None,
+    llm_mode: str | None = None,
 ):
-    llm = _build_chat_llm(settings)
+    llm = _build_chat_llm(settings, llm_mode=llm_mode)
     if llm is None:
         return None
 
@@ -170,6 +182,7 @@ async def invoke_chat_agent(
     user_id: int | None = None,
     user_role: str | None = None,
     conversation_id: str | None = None,
+    llm_mode: str | None = None,
 ) -> str:
     # 1. Load relevant long-term memories for this user (if we know who they are).
     memories: list[Memory] = []
@@ -210,6 +223,7 @@ async def invoke_chat_agent(
         request_base=request_base,
         request_token=request_token,
         system_prompt_override=system_prompt,
+        llm_mode=llm_mode,
     )
     if graph is None:
         raise RuntimeError(

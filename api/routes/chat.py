@@ -60,6 +60,8 @@ async def chat(
     user_role = str(user_role_raw).lower() if user_role_raw else "user"
     if user_role not in {"admin", "manager", "user"}:
         user_role = "user"
+    llm_mode_raw = body.context.get("llm_mode") if isinstance(body.context, dict) else None
+    llm_mode = str(llm_mode_raw) if llm_mode_raw else None
     conv = body.conversation_id or str(uuid.uuid4())
     try:
         reply = await invoke_chat_agent(
@@ -71,6 +73,7 @@ async def chat(
             user_id=body.user_id,
             user_role=user_role,
             conversation_id=conv,
+            llm_mode=llm_mode,
         )
         print(
             "[desert.chat] chat_reply ok tenant_id=%s user_id=%s"
